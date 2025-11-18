@@ -1,9 +1,7 @@
-package sbhackathon.koala.happyMSP.deployment_CD.entity;
+package sbhackathon.koala.happyMSP.entity;
 
 import jakarta.persistence.*;
 import lombok.*;
-import sbhackathon.koala.happyMSP.build_A.entity.Ecr;
-import sbhackathon.koala.happyMSP.build_A.entity.Repository;
 
 import java.util.ArrayList;
 import java.util.List;

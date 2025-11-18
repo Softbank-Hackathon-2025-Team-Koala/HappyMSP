@@ -7,7 +7,7 @@ import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import sbhackathon.koala.happyMSP.build_A.dto.*;
-import sbhackathon.koala.happyMSP.build_A.entity.Repository;
+import sbhackathon.koala.happyMSP.entity.Repository;
 import sbhackathon.koala.happyMSP.build_A.repository.repoRepository;
 import sbhackathon.koala.happyMSP.build_A.util.ImageTagGenerator;
 

@@ -2,7 +2,7 @@ package sbhackathon.koala.happyMSP.build_A.dto;
 
 import lombok.Builder;
 import lombok.Getter;
-import sbhackathon.koala.happyMSP.build_A.entity.Repository;
+import sbhackathon.koala.happyMSP.entity.Repository;
 
 @Getter
 @Builder
