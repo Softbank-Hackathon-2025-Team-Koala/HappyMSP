@@ -25,12 +25,41 @@ public class Repository {
     @Column(name = "latest_commit")
     private String latestCommit;
 
+    @Enumerated(EnumType.STRING)
+    @Column(name = "deployment_status")
+    private DeploymentStatus deploymentStatus = DeploymentStatus.NOT_DEPLOYED;
+
     @OneToMany(mappedBy = "repository", fetch = FetchType.LAZY)
     private List<Service> services = new ArrayList<>();
+
+    public enum DeploymentStatus {
+        NOT_DEPLOYED("미등록"),
+        DEPLOYING("배포중"),
+        DEPLOYED("배포완료");
+
+        private final String description;
+
+        DeploymentStatus(String description) {
+            this.description = description;
+        }
+
+        public String getDescription() {
+            return description;
+        }
+    }
 
     @Builder
     public Repository(String uri, String latestCommit) {
         this.uri = uri;
         this.latestCommit = latestCommit;
+        this.deploymentStatus = DeploymentStatus.NOT_DEPLOYED;
+    }
+
+    public void updateLatestCommit(String latestCommit) {
+        this.latestCommit = latestCommit;
+    }
+
+    public void updateDeploymentStatus(DeploymentStatus status) {
+        this.deploymentStatus = status;
     }
 }
