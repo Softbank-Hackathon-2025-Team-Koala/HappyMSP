@@ -16,5 +16,6 @@ public class ServiceScanResultDto {
         private final String name;
         private final String path;
         private final boolean dockerfileExists;
+        private final Integer portNumber;
     }
 }

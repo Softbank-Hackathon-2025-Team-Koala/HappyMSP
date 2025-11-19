@@ -15,14 +15,17 @@ import java.util.List;
 public class Service {
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
-    @Column(name = "service_id")
-    private int serviceId;
+    @Column(name = "id")
+    private int id;
 
-    @Column(name = "service_name")
-    private String serviceName;
+    @Column(name = "name")
+    private String name;
 
     @Column(name = "address", nullable = false)
     private String address;
+
+    @Column(name = "port_number")
+    private Integer portNumber;
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "repo_id", nullable = false)
@@ -32,9 +35,10 @@ public class Service {
     private List<Ecr> ecrs = new ArrayList<>();
 
     @Builder
-    public Service(String serviceName, String address, Repository repository) {
-        this.serviceName = serviceName;
+    public Service(String name, String address, Repository repository, Integer portNumber) {
+        this.name = name;
         this.address = address;
         this.repository = repository;
+        this.portNumber = portNumber;
     }
 }
