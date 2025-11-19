@@ -38,6 +38,7 @@ dependencies {
 
 	implementation platform('software.amazon.awssdk:bom:2.25.10')
 	implementation 'software.amazon.awssdk:ecr'
+    implementation 'software.amazon.awssdk:sts'
 
 	implementation 'org.eclipse.jgit:org.eclipse.jgit:6.7.0.202309050840-r'
 
