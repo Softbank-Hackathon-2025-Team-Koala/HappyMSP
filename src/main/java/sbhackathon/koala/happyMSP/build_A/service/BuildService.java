@@ -3,7 +3,6 @@ package sbhackathon.koala.happyMSP.build_A.service;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import jakarta.persistence.EntityManager;
@@ -13,16 +12,12 @@ import sbhackathon.koala.happyMSP.entity.Repository;
 import sbhackathon.koala.happyMSP.entity.ServiceStatus;
 import sbhackathon.koala.happyMSP.build_A.repository.repoRepository;
 import sbhackathon.koala.happyMSP.deployment_CD.repository.ServiceRepository;
-import sbhackathon.koala.happyMSP.build_A.util.ImageTagGenerator;
 
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.util.ArrayList;
-import java.util.List;
 import java.util.Optional;
-import java.util.concurrent.CompletableFuture;
 
 @Slf4j
 @Service
@@ -31,9 +26,7 @@ public class BuildService {
 
     private final GitService gitService;
     private final ServiceScanner serviceScanner;
-    private final DockerService dockerService;
-    private final EcrService ecrService;
-    private final ImageTagGenerator imageTagGenerator;
+    private final AsyncBuildService asyncBuildService;
     private final repoRepository repositoryRepo;
     private final ServiceRepository serviceRepository;
     
@@ -136,10 +129,14 @@ public class BuildService {
             entityManager.flush(); // Ensure all changes are persisted
             entityManager.refresh(repository); // Refresh to get updated services collection
             
-            // Start async deployment for Docker build and ECR push
-            startAsyncDeployment(repository.getId(), request.getRepositoryUrl(), latestCommit);
-
+            // Start async deployment for Docker build and ECR push (fire-and-forget)
+            log.info("Triggering async deployment for repository: {} (background process)", repository.getId());
+            asyncBuildService.startAsyncDeployment(repository.getId(), request.getRepositoryUrl(), latestCommit);
+            
+            // Return immediate response without waiting for async deployment
             RepositoryDto repositoryDto = RepositoryDto.from(repository);
+            log.info("Returning immediate response for repository {} with {} services in PENDING status", 
+                    repository.getId(), repository.getServices().size());
             return PostRepositoryResponseDto.success(repositoryDto);
 
         } catch (Exception e) {
@@ -149,141 +146,6 @@ public class BuildService {
             // Clean up temporary clone directory
             cleanupTempDirectory(tempProjectId);
         }
-    }
-
-    @Async("buildTaskExecutor")
-    @Transactional
-    public CompletableFuture<Void> startAsyncDeployment(int repositoryId, String repositoryUrl, String latestCommit) {
-        try {
-            log.info("Starting async deployment for repository {}", repositoryId);
-
-            String projectId = "project-" + repositoryId;
-
-            CloneResultDto cloneResult = gitService.cloneRepository(repositoryUrl, projectId);
-            log.info("Git clone completed: {}", cloneResult.getGitSha());
-
-            Repository repository = repositoryRepo.findById(repositoryId)
-                    .orElseThrow(() -> new RuntimeException("Repository not found"));
-                    
-            List<String> deployedServices = new ArrayList<>();
-            
-            // Extract repository name from URL for Docker image tagging
-            String repositoryName = imageTagGenerator.extractRepositoryNameFromUrl(repositoryUrl);
-
-            // Find all services for this repository
-            List<sbhackathon.koala.happyMSP.entity.Service> services = repository.getServices();
-            
-            for (sbhackathon.koala.happyMSP.entity.Service service : services) {
-                try {
-                    log.info("Starting deployment for service: {}", service.getName());
-                    
-                    // Update status to BUILDING
-                    service.updateStatus(ServiceStatus.BUILDING);
-                    serviceRepository.save(service);
-                    log.info("Service {} status updated to BUILDING", service.getName());
-                    
-                    String imageTag = imageTagGenerator.generate(repositoryName, service.getName(),
-                            cloneResult.getGitSha());
-                    log.info("Generated image tag: {}", imageTag);
-
-                    // Find service directory path (reconstruct from service scan)
-                    String servicePath = cloneResult.getRepoPath() + "/services/" + service.getName();
-                    
-                    // Docker Build Phase
-                    BuildResultDto buildResult = dockerService.buildImage(
-                            service.getName(),
-                            servicePath,
-                            imageTag);
-
-                    if (buildResult.isSuccess()) {
-                        // Update status to BUILT
-                        service.updateStatus(ServiceStatus.BUILT);
-                        serviceRepository.save(service);
-                        log.info("Service {} built successfully, status updated to BUILT", service.getName());
-                        
-                        try {
-                            // Update status to PUSHING
-                            service.updateStatus(ServiceStatus.PUSHING);
-                            serviceRepository.save(service);
-                            log.info("Service {} status updated to PUSHING", service.getName());
-                            
-                            // ECR Push Phase
-                            String registryUri = ecrRegistryUri;
-                            PushResultDto pushResult = ecrService.pushImage(
-                                    service.getName(),
-                                    imageTag,
-                                    registryUri);
-
-                            if (pushResult.isSuccess()) {
-                                // Update status to PUSHED
-                                service.updateStatus(ServiceStatus.PUSHED);
-                                service.updateAddress(pushResult.getImageUri());
-                                serviceRepository.save(service);
-                                
-                                deployedServices.add(service.getName());
-                                log.info("Service {} pushed successfully with ECR URI: {}, port: {}", 
-                                        service.getName(), pushResult.getImageUri(), service.getPortNumber());
-                            } else {
-                                service.updateStatus(ServiceStatus.FAILED);
-                                serviceRepository.save(service);
-                                log.error("Failed to push service {} to ECR: {}", service.getName(),
-                                        pushResult.getErrorMessage());
-                            }
-                        } catch (Exception pushException) {
-                            service.updateStatus(ServiceStatus.FAILED);
-                            serviceRepository.save(service);
-                            log.error("Exception during ECR push for service {}: {}", service.getName(), 
-                                    pushException.getMessage(), pushException);
-                        }
-                    } else {
-                        service.updateStatus(ServiceStatus.FAILED);
-                        serviceRepository.save(service);
-                        log.error("Failed to build service {}: {}", service.getName(), buildResult.getBuildLog());
-                    }
-                } catch (Exception e) {
-                    try {
-                        service.updateStatus(ServiceStatus.FAILED);
-                        serviceRepository.save(service);
-                    } catch (Exception saveException) {
-                        log.error("Failed to save FAILED status for service {}: {}", service.getName(), 
-                                saveException.getMessage());
-                    }
-                    log.error("Unexpected error deploying service {}: {}", service.getName(), e.getMessage(), e);
-                }
-            }
-
-            repository.updateLatestCommit(latestCommit);
-            repositoryRepo.save(repository);
-
-            log.info("Deployment completed for repository {}. Deployed services: {}", repositoryId, deployedServices);
-
-        } catch (Exception e) {
-            log.error("Async deployment failed for repository {}: {}", repositoryId, e.getMessage(), e);
-
-            try {
-                // Set all services in this repository to FAILED if they're still in progress
-                Repository repository = repositoryRepo.findById(repositoryId)
-                        .orElseThrow(() -> new RuntimeException("Repository not found"));
-                
-                for (sbhackathon.koala.happyMSP.entity.Service service : repository.getServices()) {
-                    if (service.getStatus() == ServiceStatus.PENDING ||
-                        service.getStatus() == ServiceStatus.BUILDING ||
-                        service.getStatus() == ServiceStatus.BUILT ||
-                        service.getStatus() == ServiceStatus.PUSHING) {
-                        service.updateStatus(ServiceStatus.FAILED);
-                        serviceRepository.save(service);
-                        log.info("Set service {} status to FAILED due to repository deployment failure", service.getName());
-                    }
-                }
-                
-                repositoryRepo.save(repository);
-            } catch (Exception cleanupException) {
-                log.error("Failed to cleanup services after repository deployment failure: {}", 
-                        cleanupException.getMessage(), cleanupException);
-            }
-        }
-
-        return CompletableFuture.completedFuture(null);
     }
 
     private void cleanupTempDirectory(String projectId) {
