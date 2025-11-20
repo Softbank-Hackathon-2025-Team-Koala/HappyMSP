@@ -6,6 +6,8 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.PersistenceContext;
 import sbhackathon.koala.happyMSP.build_A.dto.*;
 import sbhackathon.koala.happyMSP.entity.Repository;
 import sbhackathon.koala.happyMSP.build_A.repository.repoRepository;
@@ -33,6 +35,9 @@ public class BuildService {
     private final ImageTagGenerator imageTagGenerator;
     private final repoRepository repositoryRepo;
     private final ServiceRepository serviceRepository;
+    
+    @PersistenceContext
+    private EntityManager entityManager;
 
     @Value("${build.workspace.path}")
     private String workspacePath;
@@ -41,16 +46,40 @@ public class BuildService {
     private String ecrRegistryUri;
 
     @Transactional(readOnly = true)
-    public RepositoryStatusDto getRepositoryStatus(int repositoryId) {
-        Optional<Repository> repository = repositoryRepo.findById(repositoryId);
-        if (repository.isEmpty()) {
-            throw new RuntimeException("Repository not found with id: " + repositoryId);
+    public GetRepositoryResponseDto getRepositoryStatus(String repoUrl) {
+        try {
+            // Normalize URL
+            String normalizedUrl = gitService.normalizeGitUrl(repoUrl);
+            
+            // Find repository by normalized URL
+            Optional<Repository> repositoryOpt = repositoryRepo.findByUri(normalizedUrl);
+            
+            if (repositoryOpt.isEmpty()) {
+                return GetRepositoryResponseDto.notExist();
+            }
+            
+            Repository repository = repositoryOpt.get();
+            RepositoryDto repositoryDto = RepositoryDto.from(repository);
+            
+            // Determine state based on service deploy status
+            RepositoryState state;
+            if (repository.getServices().isEmpty()) {
+                state = RepositoryState.NO_EXIST;
+            } else {
+                boolean allDeployed = repository.getServices().stream()
+                        .allMatch(service -> service.getDeployStatus() == sbhackathon.koala.happyMSP.entity.ServiceDeployStatus.DEPLOYED);
+                state = allDeployed ? RepositoryState.DEPLOYED : RepositoryState.DEPLOYING;
+            }
+            
+            return GetRepositoryResponseDto.of(state, repositoryDto);
+        } catch (Exception e) {
+            log.error("Error getting repository status for URL {}: {}", repoUrl, e.getMessage());
+            throw new RuntimeException("Failed to get repository status", e);
         }
-        return RepositoryStatusDto.from(repository.get());
     }
 
     @Transactional
-    public DeploymentResponseDto requestDeployment(DeploymentRequestDto request) {
+    public PostRepositoryResponseDto requestDeployment(PostRepositoryRequestDto request) {
         String tempProjectId = "temp-" + System.currentTimeMillis();
         try {
             // Normalize GitHub URL
@@ -68,11 +97,8 @@ public class BuildService {
                 repository = repositoryOpt.get();
 
                 if (latestCommit.equals(repository.getLatestCommit())) {
-                    return DeploymentResponseDto.builder()
-                            .success(false)
-                            .message("No changes detected. Deployment skipped.")
-                            .deployedServices(List.of())
-                            .build();
+                    RepositoryDto repositoryDto = RepositoryDto.from(repository);
+                    return PostRepositoryResponseDto.alreadyDeployed(repositoryDto);
                 }
 
                 repository.updateLatestCommit(latestCommit);
@@ -84,24 +110,40 @@ public class BuildService {
             }
 
             repositoryRepo.save(repository);
-
+            
+            // Scan services and create Service entities immediately
+            ServiceScanResultDto scanResult = serviceScanner.scanServices(cloneResult.getRepoPath());
+            log.info("Service scan completed. Found {} services", scanResult.getServices().size());
+            
+            // Create Service entities with PENDING status
+            for (ServiceScanResultDto.ServiceInfo serviceInfo : scanResult.getServices()) {
+                String expectedEcrUri = ecrRegistryUri + "/" + serviceInfo.getName() + ":latest";
+                
+                sbhackathon.koala.happyMSP.entity.Service serviceEntity = sbhackathon.koala.happyMSP.entity.Service.builder()
+                        .name(serviceInfo.getName())
+                        .address(expectedEcrUri) // Temporary ECR URI
+                        .repository(repository)
+                        .portNumber(serviceInfo.getPortNumber())
+                        .deployStatus(sbhackathon.koala.happyMSP.entity.ServiceDeployStatus.PENDING)
+                        .build();
+                
+                serviceRepository.save(serviceEntity);
+                log.info("Created Service entity: {} with status PENDING", serviceInfo.getName());
+            }
+            
+            // Start async deployment for Docker build and ECR push
             startAsyncDeployment(repository.getId(), request.getRepositoryUrl(), latestCommit);
 
-            return DeploymentResponseDto.builder()
-                    .success(true)
-                    .message("Deployment started")
-                    .deploymentStatus("배포중")
-                    .deployedServices(List.of())
-                    .build();
+            // Flush and refresh to get updated repository with services
+            entityManager.flush(); // Ensure all changes are persisted
+            entityManager.refresh(repository); // Refresh to get updated services collection
+            
+            RepositoryDto repositoryDto = RepositoryDto.from(repository);
+            return PostRepositoryResponseDto.success(repositoryDto);
 
         } catch (Exception e) {
             log.error("Failed to start deployment for repository: {}", e.getMessage());
-            return DeploymentResponseDto.builder()
-                    .success(false)
-                    .message("Failed to start deployment")
-                    .deploymentStatus("배포실패")
-                    .errorMessage(e.getMessage())
-                    .build();
+            throw new RuntimeException("Failed to start deployment", e);
         } finally {
             // Clean up temporary clone directory
             cleanupTempDirectory(tempProjectId);
@@ -119,60 +161,60 @@ public class BuildService {
             CloneResultDto cloneResult = gitService.cloneRepository(repositoryUrl, projectId);
             log.info("Git clone completed: {}", cloneResult.getGitSha());
 
-            ServiceScanResultDto scanResult = serviceScanner.scanServices(cloneResult.getRepoPath());
-            log.info("Service scan completed. Found {} services", scanResult.getServices().size());
-
+            Repository repository = repositoryRepo.findById(repositoryId)
+                    .orElseThrow(() -> new RuntimeException("Repository not found"));
+                    
             List<String> deployedServices = new ArrayList<>();
 
-            for (ServiceScanResultDto.ServiceInfo serviceInfo : scanResult.getServices()) {
+            // Find all services for this repository
+            List<sbhackathon.koala.happyMSP.entity.Service> services = repository.getServices();
+            
+            for (sbhackathon.koala.happyMSP.entity.Service service : services) {
                 try {
-                    String imageTag = imageTagGenerator.generate(projectId, serviceInfo.getName(),
+                    // Update status to BUILDING
+                    service.updateDeployStatus(sbhackathon.koala.happyMSP.entity.ServiceDeployStatus.BUILDING);
+                    serviceRepository.save(service);
+                    
+                    String imageTag = imageTagGenerator.generate(projectId, service.getName(),
                             cloneResult.getGitSha());
 
+                    // Find service directory path (reconstruct from service scan)
+                    String servicePath = cloneResult.getRepoPath() + "/services/" + service.getName();
+                    
                     BuildResultDto buildResult = dockerService.buildImage(
-                            serviceInfo.getName(),
-                            serviceInfo.getPath(),
+                            service.getName(),
+                            servicePath,
                             imageTag);
 
                     if (buildResult.isSuccess()) {
                         String registryUri = ecrRegistryUri;
                         PushResultDto pushResult = ecrService.pushImage(
-                                serviceInfo.getName(),
+                                service.getName(),
                                 imageTag,
                                 registryUri);
 
                         if (pushResult.isSuccess()) {
-                            // Create Service entity with port information
-                            Repository repo = repositoryRepo.findById(repositoryId)
-                                    .orElseThrow(() -> new RuntimeException("Repository not found"));
+                            // Update Service entity with actual ECR URI and DEPLOYED status
+                            service.updateAddress(pushResult.getImageUri());
+                            service.updateDeployStatus(sbhackathon.koala.happyMSP.entity.ServiceDeployStatus.DEPLOYED);
+                            serviceRepository.save(service);
 
-                            sbhackathon.koala.happyMSP.entity.Service serviceEntity = sbhackathon.koala.happyMSP.entity.Service
-                                    .builder()
-                                    .name(serviceInfo.getName())
-                                    .address(pushResult.getImageUri())
-                                    .repository(repo)
-                                    .portNumber(serviceInfo.getPortNumber())
-                                    .build();
-
-                            serviceRepository.save(serviceEntity);
-
-                            deployedServices.add(serviceInfo.getName());
-                            log.info("Successfully deployed service: {} with port: {}", serviceInfo.getName(),
-                                    serviceInfo.getPortNumber());
+                            deployedServices.add(service.getName());
+                            log.info("Successfully deployed service: {} with port: {}", service.getName(),
+                                    service.getPortNumber());
                         } else {
-                            log.error("Failed to push service {}: {}", serviceInfo.getName(),
+                            log.error("Failed to push service {}: {}", service.getName(),
                                     pushResult.getErrorMessage());
+                            // Keep BUILDING status or set to error state
                         }
                     } else {
-                        log.error("Failed to build service {}: {}", serviceInfo.getName(), buildResult.getBuildLog());
+                        log.error("Failed to build service {}: {}", service.getName(), buildResult.getBuildLog());
+                        // Keep BUILDING status or set to error state
                     }
                 } catch (Exception e) {
-                    log.error("Error deploying service {}: {}", serviceInfo.getName(), e.getMessage());
+                    log.error("Error deploying service {}: {}", service.getName(), e.getMessage());
                 }
             }
-
-            Repository repository = repositoryRepo.findById(repositoryId)
-                    .orElseThrow(() -> new RuntimeException("Repository not found"));
 
             repository.updateLatestCommit(latestCommit);
             repositoryRepo.save(repository);

@@ -15,7 +15,7 @@ import lombok.ToString;
 public class Ecr {
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
-    @Column(name = "ecr_id")
+    @Column(name = "id")
     private int ecrId;
 
     @Column(name = "name")
