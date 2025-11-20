@@ -7,8 +7,10 @@ import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import sbhackathon.koala.happyMSP.build_A.dto.*;
+import sbhackathon.koala.happyMSP.entity.Ecr;
 import sbhackathon.koala.happyMSP.entity.Repository;
 import sbhackathon.koala.happyMSP.entity.ServiceStatus;
+import sbhackathon.koala.happyMSP.build_A.repository.EcrRepository;
 import sbhackathon.koala.happyMSP.build_A.repository.repoRepository;
 import sbhackathon.koala.happyMSP.deployment_CD.repository.ServiceRepository;
 import sbhackathon.koala.happyMSP.build_A.util.ImageTagGenerator;
@@ -32,6 +34,7 @@ public class AsyncBuildService {
     private final ImageTagGenerator imageTagGenerator;
     private final repoRepository repositoryRepo;
     private final ServiceRepository serviceRepository;
+    private final EcrRepository ecrRepository;
 
     @Value("${build.workspace.path}")
     private String workspacePath;
@@ -101,6 +104,9 @@ public class AsyncBuildService {
                             if (pushResult.isSuccess()) {
                                 // Update status to PUSHED
                                 updateServiceStatusAndAddress(service, ServiceStatus.PUSHED, pushResult.getImageUri());
+                                
+                                // Create and save ECR Entity
+                                createEcrEntity(service, pushResult.getImageUri(), imageTag);
                                 
                                 deployedServices.add(service.getName());
                                 log.info("Service {} pushed successfully with ECR URI: {}, port: {}", 
@@ -212,5 +218,22 @@ public class AsyncBuildService {
         service.updateStatus(status);
         service.updateAddress(address);
         serviceRepository.save(service);
+    }
+
+    @Transactional
+    private void createEcrEntity(sbhackathon.koala.happyMSP.entity.Service service, String imageUri, String imageTag) {
+        try {
+            Ecr ecr = Ecr.builder()
+                    .name(service.getName())
+                    .uri(imageUri)
+                    .tag(imageTag)
+                    .service(service)
+                    .build();
+            
+            ecrRepository.save(ecr);
+            log.info("ECR entity created for service: {} with URI: {}", service.getName(), imageUri);
+        } catch (Exception e) {
+            log.error("Failed to create ECR entity for service: {}, error: {}", service.getName(), e.getMessage(), e);
+        }
     }
 }
