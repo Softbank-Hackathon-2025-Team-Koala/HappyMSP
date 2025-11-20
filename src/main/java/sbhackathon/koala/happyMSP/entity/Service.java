@@ -28,8 +28,8 @@ public class Service {
     private Integer portNumber;
 
     @Enumerated(EnumType.STRING)
-    @Column(name = "deploy_status")
-    private ServiceDeployStatus deployStatus = ServiceDeployStatus.PENDING;
+    @Column(name = "status")
+    private ServiceStatus status = ServiceStatus.PENDING;
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "repo_id", nullable = false)
@@ -39,16 +39,16 @@ public class Service {
     private List<Ecr> ecrs = new ArrayList<>();
 
     @Builder
-    public Service(String name, String address, Repository repository, Integer portNumber, ServiceDeployStatus deployStatus) {
+    public Service(String name, String address, Repository repository, Integer portNumber, ServiceStatus status) {
         this.name = name;
         this.address = address;
         this.repository = repository;
         this.portNumber = portNumber;
-        this.deployStatus = deployStatus != null ? deployStatus : ServiceDeployStatus.PENDING;
+        this.status = status != null ? status : ServiceStatus.PENDING;
     }
 
-    public void updateDeployStatus(ServiceDeployStatus deployStatus) {
-        this.deployStatus = deployStatus;
+    public void updateStatus(ServiceStatus status) {
+        this.status = status;
     }
 
     public void updateAddress(String address) {
