@@ -1,9 +1,7 @@
-package sbhackathon.koala.happyMSP.deployment_CD.entity;
+package sbhackathon.koala.happyMSP.entity;
 
 import jakarta.persistence.*;
 import lombok.*;
-import sbhackathon.koala.happyMSP.build_A.entity.Ecr;
-import sbhackathon.koala.happyMSP.build_A.entity.Repository;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -17,14 +15,21 @@ import java.util.List;
 public class Service {
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
-    @Column(name = "service_id")
-    private int serviceId;
+    @Column(name = "id")
+    private int id;
 
-    @Column(name = "service_name")
-    private String serviceName;
+    @Column(name = "name")
+    private String name;
 
     @Column(name = "address", nullable = false)
     private String address;
+
+    @Column(name = "port_number")
+    private Integer portNumber;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "status")
+    private ServiceStatus status = ServiceStatus.PENDING;
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "repo_id", nullable = false)
@@ -34,9 +39,19 @@ public class Service {
     private List<Ecr> ecrs = new ArrayList<>();
 
     @Builder
-    public Service(String serviceName, String address, Repository repository) {
-        this.serviceName = serviceName;
+    public Service(String name, String address, Repository repository, Integer portNumber, ServiceStatus status) {
+        this.name = name;
         this.address = address;
         this.repository = repository;
+        this.portNumber = portNumber;
+        this.status = status != null ? status : ServiceStatus.PENDING;
+    }
+
+    public void updateStatus(ServiceStatus status) {
+        this.status = status;
+    }
+
+    public void updateAddress(String address) {
+        this.address = address;
     }
 }

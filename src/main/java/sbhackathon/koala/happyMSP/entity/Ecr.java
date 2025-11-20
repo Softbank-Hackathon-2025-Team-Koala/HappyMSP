@@ -1,11 +1,10 @@
-package sbhackathon.koala.happyMSP.build_A.entity;
+package sbhackathon.koala.happyMSP.entity;
 
 import jakarta.persistence.*;
 import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.ToString;
-import sbhackathon.koala.happyMSP.deployment_CD.entity.Service;
 
 // 엔티티 클래스 자기 개발방식에 맞게 바꾸셔도 상관없어요! (생성자등)
 @Entity
@@ -16,7 +15,7 @@ import sbhackathon.koala.happyMSP.deployment_CD.entity.Service;
 public class Ecr {
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
-    @Column(name = "ecr_id")
+    @Column(name = "id")
     private int ecrId;
 
     @Column(name = "name")

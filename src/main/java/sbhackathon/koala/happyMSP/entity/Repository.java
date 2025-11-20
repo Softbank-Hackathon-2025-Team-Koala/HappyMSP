@@ -1,8 +1,7 @@
-package sbhackathon.koala.happyMSP.build_A.entity;
+package sbhackathon.koala.happyMSP.entity;
 
 import jakarta.persistence.*;
 import lombok.*;
-import sbhackathon.koala.happyMSP.deployment_CD.entity.Service;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -10,16 +9,16 @@ import java.util.List;
 // 엔티티 클래스 자기 개발방식에 맞게 바꾸셔도 상관없어요! (생성자등)
 @Entity
 @Getter
-@ToString(exclude = {"services"})
+@ToString(exclude = { "services" })
 @Table(name = "repository")
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 public class Repository {
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
-    @Column(name = "repo_id")
-    private int repoId;
+    @Column(name = "id")
+    private int id;
 
-    @Column(name = "repo_uri")
+    @Column(name = "uri")
     private String uri;
 
     @Column(name = "latest_commit")
@@ -33,4 +32,9 @@ public class Repository {
         this.uri = uri;
         this.latestCommit = latestCommit;
     }
+
+    public void updateLatestCommit(String latestCommit) {
+        this.latestCommit = latestCommit;
+    }
+
 }
