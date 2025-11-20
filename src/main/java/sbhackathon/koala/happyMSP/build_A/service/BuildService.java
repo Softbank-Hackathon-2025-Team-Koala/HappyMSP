@@ -166,6 +166,9 @@ public class BuildService {
                     .orElseThrow(() -> new RuntimeException("Repository not found"));
                     
             List<String> deployedServices = new ArrayList<>();
+            
+            // Extract repository name from URL for Docker image tagging
+            String repositoryName = imageTagGenerator.extractRepositoryNameFromUrl(repositoryUrl);
 
             // Find all services for this repository
             List<sbhackathon.koala.happyMSP.entity.Service> services = repository.getServices();
@@ -179,8 +182,9 @@ public class BuildService {
                     serviceRepository.save(service);
                     log.info("Service {} status updated to BUILDING", service.getName());
                     
-                    String imageTag = imageTagGenerator.generate(projectId, service.getName(),
+                    String imageTag = imageTagGenerator.generate(repositoryName, service.getName(),
                             cloneResult.getGitSha());
+                    log.info("Generated image tag: {}", imageTag);
 
                     // Find service directory path (reconstruct from service scan)
                     String servicePath = cloneResult.getRepoPath() + "/services/" + service.getName();
