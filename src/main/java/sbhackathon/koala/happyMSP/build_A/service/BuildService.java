@@ -7,24 +7,17 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import jakarta.persistence.EntityManager;
-import jakarta.persistence.PersistenceContext;
 import sbhackathon.koala.happyMSP.build_A.dto.*;
-import sbhackathon.koala.happyMSP.build_A.repository.RepoRepository;
 import sbhackathon.koala.happyMSP.build_A.repository.RepoRepository;
 import sbhackathon.koala.happyMSP.deployment_CD.repository.ServiceRepository;
 import sbhackathon.koala.happyMSP.entity.Repository;
 import sbhackathon.koala.happyMSP.entity.ServiceStatus;
-import sbhackathon.koala.happyMSP.deployment_CD.repository.ServiceRepository;
 
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.util.ArrayList;
-import java.util.List;
 import java.util.Optional;
-import java.util.concurrent.CompletableFuture;
 
 @Slf4j
 @Service
@@ -78,7 +71,6 @@ public class BuildService {
             log.error("Error getting repository status for URL {}: {}", repoUrl, e.getMessage());
             throw new RuntimeException("Failed to get repository status", e);
         }
-        return RepositoryStatusDto.from(repository.get());
     }
 
     @Transactional

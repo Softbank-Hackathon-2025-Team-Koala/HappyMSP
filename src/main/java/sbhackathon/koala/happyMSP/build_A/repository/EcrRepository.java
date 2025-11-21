@@ -6,5 +6,5 @@ import sbhackathon.koala.happyMSP.entity.Ecr;
 import java.util.List;
 
 public interface EcrRepository extends JpaRepository<Ecr, Integer> {
-    List<Ecr> findByService_ServiceId(int serviceServiceId);
+    List<Ecr> findByService_Id(int serviceId);
 }

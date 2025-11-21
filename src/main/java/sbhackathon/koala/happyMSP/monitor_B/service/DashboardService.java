@@ -41,13 +41,8 @@ public class DashboardService {
     private final RepoRepository repoRepository;
     private final SseEventStream eventStream;
 
-    // [캐시] Pod 이름 -> DTO 매핑 (상태와 메트릭을 병합해서 저장)
     private final Map<String, ServiceMetricDto> podStateCache = new ConcurrentHashMap<>();
-
-    // [캐시] Pod 이름 -> CPU/Memory 정보 (별도 스레드가 갱신)
     private final Map<String, String[]> metricsCache = new ConcurrentHashMap<>();
-
-    // Pod 이름 -> 시작 시간 (Age 실시간 계산용)
     private final Map<String, Instant> podStartTimeCache = new ConcurrentHashMap<>();
 
     private CoreV1Api api;
@@ -56,7 +51,6 @@ public class DashboardService {
     public void init() {
         try {
             ApiClient client = Config.defaultClient();
-            // 타임아웃 무제한 설정 (Watch 연결 유지를 위해 필수)
             client.setReadTimeout(0);
             Configuration.setDefaultApiClient(client);
             api = new CoreV1Api();
@@ -74,18 +68,17 @@ public class DashboardService {
         Repository repo = repoRepository.findByUri(searchUrl)
                 .orElseThrow(() -> new RuntimeException("Repository not found: " + searchUrl));
 
-        String projectName = "project-" + repo.getRepoId();
+        // [변경] 프로젝트명을 repo.getId()가 아닌 리포지토리 이름으로 설정
+        String projectName = extractRepositoryName(repoUrl);
+        log.info("Monitoring Project Name (Sanitized): {}", projectName);
 
-        // 캐시 초기화
         podStateCache.clear();
         metricsCache.clear();
         podStartTimeCache.clear();
 
-        // [스레드1] 메트릭 폴러 (CPU/Memory & Age)
         ExecutorService metricExecutor = Executors.newSingleThreadExecutor();
         metricExecutor.submit(() -> runMetricPoller(projectName, metricKey));
 
-        // [스레드2] Pod Watcher
         try {
             runPodWatcher(projectName, metricKey);
         } catch (Exception e) {
@@ -95,7 +88,6 @@ public class DashboardService {
         }
     }
 
-    // === 1. Pod 상태 감시 ===
     private void runPodWatcher(String projectName, String metricKey) throws Exception {
         ApiClient client = api.getApiClient();
 
@@ -104,7 +96,6 @@ public class DashboardService {
                 log.info("Starting Watch for project: {}", projectName);
 
                 String path = "/api/v1/namespaces/default/pods";
-
                 List<Pair> queryParams = new ArrayList<>();
                 queryParams.add(new Pair("watch", "true"));
 
@@ -134,6 +125,7 @@ public class DashboardService {
 
                     String podName = pod.getMetadata().getName();
 
+                    // [중요] 파드 이름이 프로젝트 이름으로 시작하는지 확인
                     if (podName != null && podName.startsWith(projectName)) {
                         String eventType = item.type;
 
@@ -144,7 +136,6 @@ public class DashboardService {
                         } else {
                             updatePodCache(projectName, pod);
                         }
-                        // Watch이벤트 발생시 즉시 전송
                         broadcastToFrontend(metricKey);
                     }
                 }
@@ -155,16 +146,13 @@ public class DashboardService {
         }
     }
 
-    // === 2. 리소스 폴러 2초 sleep===
     private void runMetricPoller(String projectName, String metricKey) {
         while (true) {
             try {
                 long startTime = System.currentTimeMillis();
 
-                // 1. 모든 파드 메트릭 가져오기
                 String output = executeCommand("bash", "-c", "kubectl top pods --no-headers | grep " + projectName);
 
-                // 2. 메트릭 캐시 업데이트
                 if (!output.isBlank()) {
                     for (String line : output.split("\n")) {
                         if (line.isBlank()) continue;
@@ -178,16 +166,12 @@ public class DashboardService {
                     }
                 }
 
-                // 3. 모든 Pod에 대해 DTO 갱신
-                // Watcher가 감지한 모든 Pod를 대상으로 수행
                 for (String podName : podStateCache.keySet()) {
                     ServiceMetricDto oldDto = podStateCache.get(podName);
                     if (oldDto == null) continue;
 
-                    // 메트릭 가져오기 (없으면 0)
                     String[] metrics = metricsCache.getOrDefault(podName, new String[]{"0m", "0Mi"});
 
-                    // Age 재계산
                     String currentAge = oldDto.getAge();
                     Instant startInstant = podStartTimeCache.get(podName);
                     if (startInstant != null) {
@@ -202,16 +186,14 @@ public class DashboardService {
                             .restarts(oldDto.getRestarts())
                             .cpuUsage(metrics[0])
                             .memoryUsage(metrics[1])
-                            .age(currentAge) // 갱신된 Age
+                            .age(currentAge)
                             .build();
 
                     podStateCache.put(podName, newDto);
                 }
 
-                // 4. 변경 여부와 상관없이 무조건 전송 (실시간인걸 인지하게끔?)
                 broadcastToFrontend(metricKey);
 
-                // 5. 2초 대기
                 long elapsed = System.currentTimeMillis() - startTime;
                 long sleepTime = 2000 - elapsed;
                 if (sleepTime > 0) Thread.sleep(sleepTime);
@@ -225,13 +207,10 @@ public class DashboardService {
         }
     }
 
-    // === 헬퍼 메소드 ===
-
     private void updatePodCache(String projectName, V1Pod pod) {
         String podName = pod.getMetadata().getName();
         String status = pod.getStatus().getPhase();
 
-        // 상세 상태 계산
         if (pod.getStatus().getContainerStatuses() != null) {
             for (var containerStatus : pod.getStatus().getContainerStatuses()) {
                 if (containerStatus.getState().getWaiting() != null) {
@@ -244,23 +223,19 @@ public class DashboardService {
             }
         }
 
-        // Start Time 저장 (Age 계산용)
         String age = "0s";
         if (pod.getStatus().getStartTime() != null) {
             Instant startInstant = pod.getStatus().getStartTime().toInstant();
-            podStartTimeCache.put(podName, startInstant); // 캐시에 저장
-
+            podStartTimeCache.put(podName, startInstant);
             long seconds = Duration.between(startInstant, Instant.now()).getSeconds();
             age = formatDuration(seconds);
         }
 
-        // Restart Count
         int restarts = 0;
         if (pod.getStatus().getContainerStatuses() != null && !pod.getStatus().getContainerStatuses().isEmpty()) {
             restarts = pod.getStatus().getContainerStatuses().get(0).getRestartCount();
         }
 
-        // 메트릭 정보 조회
         String[] metrics = metricsCache.getOrDefault(podName, new String[]{"0m", "0Mi"});
 
         ServiceMetricDto dto = ServiceMetricDto.builder()
@@ -278,7 +253,6 @@ public class DashboardService {
 
     private void broadcastToFrontend(String metricKey) {
         List<ServiceMetricDto> data = new ArrayList<>(podStateCache.values());
-        // 데이터가 없더라도 빈 리스트 전송 (삭제 반영)
         eventStream.publish(new SseEvent(metricKey, "dashboard-update", data));
     }
 
@@ -299,11 +273,13 @@ public class DashboardService {
         }
     }
 
+    // [변경] 프로젝트명이 가변적이므로 로직 일반화
     private String extractServiceName(String projectName, String podName) {
         try {
-            String prefix = projectName + "-";
+            String prefix = projectName + "-"; // 예: softbank_test_repo-
             if (podName.startsWith(prefix)) {
                 String temp = podName.substring(prefix.length());
+                // 마지막 두 개의 해시값 부분 제거 (예: was-7fdbdf7b59-k5ghb -> was)
                 int lastDash = temp.lastIndexOf('-');
                 if (lastDash > 0) {
                     String temp2 = temp.substring(0, lastDash);
@@ -319,10 +295,20 @@ public class DashboardService {
         String url = repoUrl;
         if (url.startsWith("https://")) url = url.substring(8);
         else if (url.startsWith("http://")) url = url.substring(7);
-
         if (url.endsWith(".git")) url = url.substring(0, url.length() - 4);
-
         return url;
+    }
+
+    // [추가] 리포지토리 이름 추출
+    private String extractRepositoryName(String repoUrl) {
+        String uri = normalizeUrl(repoUrl);
+        String[] parts = uri.split("/");
+        if (parts.length > 0) {
+            String repoName = parts[parts.length - 1];
+            // 언더바(_)를 하이픈(-)으로 치환
+            return repoName.toLowerCase().replaceAll("[^a-z0-9.-]", "-");
+        }
+        return "unknown-repo";
     }
 
     private String formatDuration(long seconds) {

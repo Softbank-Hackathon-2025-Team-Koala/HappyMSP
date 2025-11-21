@@ -41,38 +41,33 @@ public class MonitorService {
                 return;
             }
 
-            // Repository 정보를 조회하여 projectName 생성
-            String searchUrl = extractRepoUri(repoUrl);
-            Repository repo = repoRepository.findByUri(searchUrl)
-                    .orElseThrow(() -> new RuntimeException("Repository not found: " + searchUrl));
-
-            String projectName = "project-" + repo.getRepoId();
+            // [변경] ProjectName 생성 (K8s 호환을 위해 특수문자 치환)
+            String projectName = extractRepositoryName(repoUrl);
+            log.info("Deploying Project: {}", projectName);
 
             List<Map<String, String>> servicePayloads = new ArrayList<>();
 
             for (sbhackathon.koala.happyMSP.entity.Service service : services) {
-                // 해당 서비스의 ECR 정보 조회
-                List<Ecr> ecrs = ecrRepository.findByService_ServiceId(service.getServiceId());
+                List<Ecr> ecrs = ecrRepository.findByService_Id(service.getId());
 
                 if (!ecrs.isEmpty()) {
                     Ecr ecr = ecrs.get(0);
-                    String fullImageUri = ecr.getUri() + ":" + ecr.getTag();
+                    String fullImageUri = ecr.getUri();
 
                     Map<String, String> svcMap = new HashMap<>();
-                    svcMap.put("serviceName", service.getServiceName());
+                    svcMap.put("serviceName", service.getName());
                     svcMap.put("imageUri", fullImageUri);
                     servicePayloads.add(svcMap);
                 }
             }
 
-            // SSE 이벤트 데이터
             Map<String, Object> deployRequestPayload = new HashMap<>();
             deployRequestPayload.put("projectName", projectName);
             deployRequestPayload.put("services", servicePayloads);
 
             Map<String, Object> eventData = new HashMap<>();
-            eventData.put("message", "🚀 " + services.size() + "개의 서비스 EKS 배포를 시작합니다.");
-            eventData.put("payload", deployRequestPayload); // 프론트에서 사용할 실제 데이터
+            eventData.put("message", "🚀 " + services.size() + "개의 서비스(" + projectName + ") EKS 배포를 시작합니다.");
+            eventData.put("payload", deployRequestPayload);
 
             notifier.publish(repoUrl, "stage-2-start", eventData);
 
@@ -102,9 +97,8 @@ public class MonitorService {
     }
 
     private boolean monitorSingleServicePipeline(String repoUrl, String projectName, sbhackathon.koala.happyMSP.entity.Service service) {
-        String serviceName = service.getServiceName();
+        String serviceName = service.getName();
 
-        // [2단계] K8s 리소스 생성 확인
         notifier.sendServiceLog(repoUrl, serviceName, "RESOURCE", "PENDING", "K8s 리소스 생성 대기 중...");
 
         if (!k8sResourcePoller.pollK8sResourceCreation(repoUrl, projectName, serviceName)) {
@@ -113,13 +107,11 @@ public class MonitorService {
         }
         notifier.sendServiceLog(repoUrl, serviceName, "RESOURCE", "SUCCESS", "K8s 리소스 생성 확인됨");
 
-        // [3단계] Pod 구동 확인
         if (!k8sResourcePoller.pollPodStartupStatus(repoUrl, projectName, serviceName)) {
             notifier.sendServiceLog(repoUrl, serviceName, "POD", "FAILED", "Pod 구동 실패 (Timeout)");
             return false;
         }
 
-        // [4단계] Ingress 확인
         notifier.sendServiceLog(repoUrl, serviceName, "INGRESS", "PENDING", "외부 접속 주소(ALB) 할당 대기 중...");
 
         if (!k8sResourcePoller.pollIngressStatus(repoUrl, projectName, serviceName)) {
@@ -146,7 +138,7 @@ public class MonitorService {
                 boolean allImagesReady = true;
 
                 for (sbhackathon.koala.happyMSP.entity.Service service : repo.getServices()) {
-                    List<Ecr> ecrs = ecrRepository.findByService_ServiceId((service.getServiceId()));
+                    List<Ecr> ecrs = ecrRepository.findByService_Id(service.getId());
 
                     if (ecrs.isEmpty()) {
                         allImagesReady = false;
@@ -186,6 +178,20 @@ public class MonitorService {
             searchUrl = searchUrl.substring(0, searchUrl.length() - 4);
         }
         return searchUrl;
+    }
+
+    // [수정] 리포지토리 이름 추출 및 K8s 호환성 처리
+    private String extractRepositoryName(String repoUrl) {
+        String uri = extractRepoUri(repoUrl);
+        // github.com/user/repo -> repo
+        String[] parts = uri.split("/");
+        if (parts.length > 0) {
+            String repoName = parts[parts.length - 1];
+            // K8s 리소스 이름 규칙: 소문자, 숫자, '-', '.' 만 허용
+            // 언더바(_)를 하이픈(-)으로 치환
+            return repoName.toLowerCase().replaceAll("[^a-z0-9.-]", "-");
+        }
+        return "unknown-repo";
     }
 
     private void sleep(long ms) {
