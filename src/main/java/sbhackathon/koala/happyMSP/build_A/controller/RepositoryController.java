@@ -17,10 +17,15 @@ public class RepositoryController {
 
     private final BuildService buildService;
 
-    @GetMapping("/{repoUrl}")
-    public ResponseEntity<GetRepositoryResponseDto> getRepositoryStatus(@PathVariable("repoUrl") String repoUrl) {
+    @GetMapping
+    public ResponseEntity<GetRepositoryResponseDto> getRepositoryStatus(@RequestParam("url") String repoUrl) {
         try {
             log.info("Getting repository status for URL: {}", repoUrl);
+            
+            if (repoUrl == null || repoUrl.trim().isEmpty()) {
+                return ResponseEntity.badRequest().build();
+            }
+            
             GetRepositoryResponseDto response = buildService.getRepositoryStatus(repoUrl);
             return ResponseEntity.ok(response);
         } catch (Exception e) {
