@@ -36,4 +36,12 @@ out/
 ### VS Code ###
 .vscode/
 
+### Environment Variables ###
+.env
+.env.local
+.env.*.local
+*.env
+!.env.example
+
+
 **/src/main/resources/application-dev.properties

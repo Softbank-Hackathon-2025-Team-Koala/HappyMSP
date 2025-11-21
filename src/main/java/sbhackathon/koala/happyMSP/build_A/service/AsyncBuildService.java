@@ -11,7 +11,7 @@ import sbhackathon.koala.happyMSP.entity.Ecr;
 import sbhackathon.koala.happyMSP.entity.Repository;
 import sbhackathon.koala.happyMSP.entity.ServiceStatus;
 import sbhackathon.koala.happyMSP.build_A.repository.EcrRepository;
-import sbhackathon.koala.happyMSP.build_A.repository.repoRepository;
+import sbhackathon.koala.happyMSP.build_A.repository.RepoRepository;
 import sbhackathon.koala.happyMSP.deployment_CD.repository.ServiceRepository;
 import sbhackathon.koala.happyMSP.build_A.util.ImageTagGenerator;
 
@@ -32,7 +32,7 @@ public class AsyncBuildService {
     private final DockerService dockerService;
     private final EcrService ecrService;
     private final ImageTagGenerator imageTagGenerator;
-    private final repoRepository repositoryRepo;
+    private final RepoRepository repositoryRepo;
     private final ServiceRepository serviceRepository;
     private final EcrRepository ecrRepository;
 

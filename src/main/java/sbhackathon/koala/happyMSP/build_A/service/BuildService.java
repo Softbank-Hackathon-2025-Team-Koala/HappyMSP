@@ -1,17 +1,17 @@
 package sbhackathon.koala.happyMSP.build_A.service;
 
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.PersistenceContext;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import jakarta.persistence.EntityManager;
-import jakarta.persistence.PersistenceContext;
 import sbhackathon.koala.happyMSP.build_A.dto.*;
+import sbhackathon.koala.happyMSP.build_A.repository.RepoRepository;
+import sbhackathon.koala.happyMSP.deployment_CD.repository.ServiceRepository;
 import sbhackathon.koala.happyMSP.entity.Repository;
 import sbhackathon.koala.happyMSP.entity.ServiceStatus;
-import sbhackathon.koala.happyMSP.build_A.repository.repoRepository;
-import sbhackathon.koala.happyMSP.deployment_CD.repository.ServiceRepository;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -26,10 +26,11 @@ public class BuildService {
 
     private final GitService gitService;
     private final ServiceScanner serviceScanner;
+
     private final AsyncBuildService asyncBuildService;
-    private final repoRepository repositoryRepo;
+    private final RepoRepository repositoryRepo;
     private final ServiceRepository serviceRepository;
-    
+
     @PersistenceContext
     private EntityManager entityManager;
 
@@ -44,17 +45,17 @@ public class BuildService {
         try {
             // Normalize URL
             String normalizedUrl = gitService.normalizeGitUrl(repoUrl);
-            
+
             // Find repository by normalized URL
             Optional<Repository> repositoryOpt = repositoryRepo.findByUri(normalizedUrl);
-            
+
             if (repositoryOpt.isEmpty()) {
                 return GetRepositoryResponseDto.notExist();
             }
-            
+
             Repository repository = repositoryOpt.get();
             RepositoryDto repositoryDto = RepositoryDto.from(repository);
-            
+
             // Determine state based on service deploy status
             RepositoryState state;
             if (repository.getServices().isEmpty()) {
@@ -64,7 +65,7 @@ public class BuildService {
                         .allMatch(service -> service.getStatus() == ServiceStatus.DEPLOYED);
                 state = allDeployed ? RepositoryState.DEPLOYED : RepositoryState.DEPLOYING;
             }
-            
+
             return GetRepositoryResponseDto.of(state, repositoryDto);
         } catch (Exception e) {
             log.error("Error getting repository status for URL {}: {}", repoUrl, e.getMessage());
@@ -112,7 +113,7 @@ public class BuildService {
             // Create Service entities with PENDING status
             for (ServiceScanResultDto.ServiceInfo serviceInfo : scanResult.getServices()) {
                 String expectedEcrUri = ecrRegistryUri + "/" + serviceInfo.getName() + ":latest";
-                
+
                 sbhackathon.koala.happyMSP.entity.Service serviceEntity = sbhackathon.koala.happyMSP.entity.Service.builder()
                         .name(serviceInfo.getName())
                         .address(expectedEcrUri) // Temporary ECR URI
@@ -120,22 +121,22 @@ public class BuildService {
                         .portNumber(serviceInfo.getPortNumber())
                         .status(ServiceStatus.PENDING)
                         .build();
-                
+
                 serviceRepository.save(serviceEntity);
                 log.info("Created Service entity: {} with status PENDING", serviceInfo.getName());
             }
-            
+
             // Flush and refresh to get updated repository with services
             entityManager.flush(); // Ensure all changes are persisted
             entityManager.refresh(repository); // Refresh to get updated services collection
-            
+
             // Start async deployment for Docker build and ECR push (fire-and-forget)
             log.info("Triggering async deployment for repository: {} (background process)", repository.getId());
             asyncBuildService.startAsyncDeployment(repository.getId(), request.getRepositoryUrl(), latestCommit);
-            
+
             // Return immediate response without waiting for async deployment
             RepositoryDto repositoryDto = RepositoryDto.from(repository);
-            log.info("Returning immediate response for repository {} with {} services in PENDING status", 
+            log.info("Returning immediate response for repository {} with {} services in PENDING status",
                     repository.getId(), repository.getServices().size());
             return PostRepositoryResponseDto.success(repositoryDto);
 
