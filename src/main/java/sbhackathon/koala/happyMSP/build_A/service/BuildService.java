@@ -7,8 +7,8 @@ import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import sbhackathon.koala.happyMSP.build_A.dto.*;
+import sbhackathon.koala.happyMSP.build_A.repository.RepoRepository;
 import sbhackathon.koala.happyMSP.entity.Repository;
-import sbhackathon.koala.happyMSP.build_A.repository.repoRepository;
 import sbhackathon.koala.happyMSP.build_A.util.ImageTagGenerator;
 
 import java.io.IOException;
@@ -30,7 +30,7 @@ public class BuildService {
     private final DockerService dockerService;
     private final EcrService ecrService;
     private final ImageTagGenerator imageTagGenerator;
-    private final repoRepository repositoryRepo;
+    private final RepoRepository repositoryRepo;
 
     @Value("${build.workspace.path}")
     private String workspacePath;
@@ -115,9 +115,9 @@ public class BuildService {
     public CompletableFuture<Void> startAsyncDeployment(int repositoryId, String repositoryUrl, String latestCommit) {
         try {
             log.info("Starting async deployment for repository {}", repositoryId);
-            
+
             String projectId = "project-" + repositoryId;
-            
+
             CloneResultDto cloneResult = gitService.cloneRepository(repositoryUrl, projectId);
             log.info("Git clone completed: {}", cloneResult.getGitSha());
             

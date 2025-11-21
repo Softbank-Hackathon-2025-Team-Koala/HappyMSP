@@ -30,8 +30,8 @@ public class EcrService {
 
     public PushResultDto pushImage(String serviceName, String localImageTag, String registryUri) {
         try {
-            String repoName = extractRepoName(serviceName);
-            
+            String repoName = localImageTag.split(":")[0];
+
             ensureRepositoryExists(repoName);
             
             String authToken = getEcrAuthToken();
