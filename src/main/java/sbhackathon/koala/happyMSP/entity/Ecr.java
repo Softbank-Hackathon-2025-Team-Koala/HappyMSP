@@ -1,21 +1,20 @@
 package sbhackathon.koala.happyMSP.entity;
 
 import jakarta.persistence.*;
-import lombok.AccessLevel;
-import lombok.Getter;
-import lombok.NoArgsConstructor;
-import lombok.ToString;
+import lombok.*;
 
 // 엔티티 클래스 자기 개발방식에 맞게 바꾸셔도 상관없어요! (생성자등)
 @Entity
 @Getter
+@Builder
 @ToString(exclude = {"service"})
 @Table(name = "ecr")
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
+@AllArgsConstructor(access = AccessLevel.PRIVATE)
 public class Ecr {
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
-    @Column(name = "ecr_id")
+    @Column(name = "id")
     private int ecrId;
 
     @Column(name = "name")
