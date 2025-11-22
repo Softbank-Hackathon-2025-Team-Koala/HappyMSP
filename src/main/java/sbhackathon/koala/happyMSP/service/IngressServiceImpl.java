@@ -4,6 +4,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import sbhackathon.koala.happyMSP.config.KubernetesConfig;
+import sbhackathon.koala.happyMSP.deployment_CD.repository.ServiceRepository;
 import sbhackathon.koala.happyMSP.dto.DeploymentRequest;
 import sbhackathon.koala.happyMSP.dto.ServiceDeployRequest;
 import sbhackathon.koala.happyMSP.infra.KubectlExecutor;
@@ -19,11 +20,14 @@ public class IngressServiceImpl implements IngressService {
 
     private final KubectlExecutor kubectlExecutor;
     private final KubernetesConfig kubernetesConfig;
+    private final ServiceRepository serviceRepository;
 
     public IngressServiceImpl(KubectlExecutor kubectlExecutor,
-                              KubernetesConfig kubernetesConfig) {
+                              KubernetesConfig kubernetesConfig,
+                              ServiceRepository serviceRepository) {
         this.kubectlExecutor = kubectlExecutor;
         this.kubernetesConfig = kubernetesConfig;
+        this.serviceRepository = serviceRepository;
     }
 
     @Override
@@ -48,8 +52,14 @@ public class IngressServiceImpl implements IngressService {
 
     @Override
     public void applyIngress(DeploymentRequest request) {
+        // serviceId로 Service 엔티티를 조회하여 serviceName 리스트 생성
         List<String> serviceNames = request.getServices().stream()
-                .map(ServiceDeployRequest::getServiceName)
+                .map(serviceRequest -> {
+                    sbhackathon.koala.happyMSP.entity.Service serviceEntity =
+                            serviceRepository.findById(serviceRequest.getServiceId())
+                                    .orElseThrow(() -> new RuntimeException("Service not found with id: " + serviceRequest.getServiceId()));
+                    return serviceEntity.getName();
+                })
                 .collect(Collectors.toList());
 
         applyIngress(request.getProjectName(), serviceNames);
@@ -82,8 +92,7 @@ public class IngressServiceImpl implements IngressService {
                 """, ingressName, namespace));
 
         // 각 서비스에 대한 path 규칙 추가
-        for (int i = 0; i < serviceNames.size(); i++) {
-            String serviceName = serviceNames.get(i);
+        for (String serviceName : serviceNames) {
             String path = "/" + serviceName;
 
             yaml.append(String.format("""
