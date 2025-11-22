@@ -1,0 +1,58 @@
+name: Deploy Backend to EC2
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  build-and-deploy:
+    runs-on: self-hosted
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+          
+      - name: Grant execute permission for gradlew
+        run: chmod +x gradlew
+        
+      - name: Build with Gradle
+        run: ./gradlew build -x test -Pspring.profiles.active=prod
+        
+      - name: Build Docker image
+        run: |
+          docker build -t happymsp:${{ github.sha }} .
+          docker tag happymsp:${{ github.sha }} happymsp:latest
+          
+      - name: Deploy application
+        run: |
+          # Stop and remove existing container
+          docker stop java-app || true
+          docker rm java-app || true
+          
+          # Run new container with same configuration as docker-compose
+          docker run -d \
+            --name java-app \
+            --restart unless-stopped \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            -v /home/ec2-user/.kube/config:/root/.kube/config \
+            --network app-network \
+            --expose 8081 \
+            -e SPRING_PROFILES_ACTIVE=prod \
+            -e BUILD_WORKSPACE_PATH=${BUILD_WORKSPACE_PATH} \
+            -e AWS_ECR_REGION=${AWS_ECR_REGION} \
+            -e AWS_ECR_REGISTRY=${AWS_ECR_REGISTRY} \
+            -e AWS_ECR_REGISTRY_URI=${AWS_ECR_REGISTRY_URI} \
+            -e AWS_REGION=${AWS_REGION} \
+            -e AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID} \
+            -e AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY} \
+            happymsp:latest
+          
+          # Restart nginx if needed
+          sudo systemctl reload nginx || true

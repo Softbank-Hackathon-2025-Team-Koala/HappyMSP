@@ -1,0 +1,32 @@
+FROM eclipse-temurin:17-jre-alpine
+
+# aws-cli 패키지 추가
+RUN apk update && \
+    apk add --no-cache \
+    curl \
+    git \
+    bash \
+    docker-cli \
+    openrc \
+    aws-cli
+
+ENV KUBECTL_VERSION=v1.29.15
+
+RUN curl -LO "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl" && \
+    chmod +x kubectl && \
+    mv kubectl /usr/local/bin/
+
+RUN echo "=== Installed Tools Versions ===" && \
+    java -version && \
+    docker --version && \
+    kubectl version --client && \
+    aws --version && \
+    git --version
+
+WORKDIR /app
+
+COPY happyMSP-0.0.1-SNAPSHOT.jar app.jar
+
+EXPOSE 8080
+
+ENTRYPOINT ["java", "-jar", "app.jar"]
