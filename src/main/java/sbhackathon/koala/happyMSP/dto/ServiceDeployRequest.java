@@ -1,23 +1,23 @@
 package sbhackathon.koala.happyMSP.dto;
 
 public class ServiceDeployRequest {
-    private String serviceName;
+    private int serviceId;
     private String imageUri;
 
     public ServiceDeployRequest() {
     }
 
-    public ServiceDeployRequest(String serviceName, String imageUri) {
-        this.serviceName = serviceName;
+    public ServiceDeployRequest(int serviceId, String imageUri) {
+        this.serviceId = serviceId;
         this.imageUri = imageUri;
     }
 
-    public String getServiceName() {
-        return serviceName;
+    public int getServiceId() {
+        return serviceId;
     }
 
-    public void setServiceName(String serviceName) {
-        this.serviceName = serviceName;
+    public void setServiceId(int serviceId) {
+        this.serviceId = serviceId;
     }
 
     public String getImageUri() {

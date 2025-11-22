@@ -3,6 +3,7 @@ package sbhackathon.koala.happyMSP.service;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
+import sbhackathon.koala.happyMSP.deployment_CD.repository.ServiceRepository;
 import sbhackathon.koala.happyMSP.dto.DeploymentRequest;
 import sbhackathon.koala.happyMSP.dto.ServiceDeployRequest;
 import sbhackathon.koala.happyMSP.infra.KubectlExecutor;
@@ -12,16 +13,19 @@ public class K8sDeploymentServiceImpl implements K8sDeploymentService {
 
     private static final Logger logger = LoggerFactory.getLogger(K8sDeploymentServiceImpl.class);
     private static final int DEFAULT_REPLICAS = 1;
-    private static final int CONTAINER_PORT = 8080;
+    private static final int DEFAULT_CONTAINER_PORT = 8080;
     private static final int SERVICE_PORT = 80;
 
     private final KubectlExecutor kubectlExecutor;
     private final K8sSecretService k8sSecretService;
+    private final ServiceRepository serviceRepository;
 
     public K8sDeploymentServiceImpl(KubectlExecutor kubectlExecutor,
-                                     K8sSecretService k8sSecretService) {
+                                     K8sSecretService k8sSecretService,
+                                     ServiceRepository serviceRepository) {
         this.kubectlExecutor = kubectlExecutor;
         this.k8sSecretService = k8sSecretService;
+        this.serviceRepository = serviceRepository;
     }
 
     @Override
@@ -41,16 +45,24 @@ public class K8sDeploymentServiceImpl implements K8sDeploymentService {
             logger.warn("ImagePullSecret 생성 중 오류 발생 (계속 진행): {}", e.getMessage());
         }
 
-        // 각 서비스에 대해 Deployment와 Service 생성
-        for (ServiceDeployRequest service : request.getServices()) {
+        // 각 서비스에 대해 Service 엔티티 조회 및 배포
+        for (ServiceDeployRequest serviceRequest : request.getServices()) {
             try {
-                logger.info("서비스 배포 중: {}", service.getServiceName());
-                deployService(request.getProjectName(), service);
-                logger.info("서비스 배포 완료: {}", service.getServiceName());
+                // Service 엔티티에서 정보 조회
+                sbhackathon.koala.happyMSP.entity.Service serviceEntity = serviceRepository.findById(serviceRequest.getServiceId())
+                        .orElseThrow(() -> new RuntimeException("Service not found with id: " + serviceRequest.getServiceId()));
+
+                String serviceName = serviceEntity.getName();
+                Integer portNumber = serviceEntity.getPortNumber() != null ? serviceEntity.getPortNumber() : DEFAULT_CONTAINER_PORT;
+
+                logger.info("서비스 배포 중: {} (Port: {})", serviceName, portNumber);
+
+                deployService(request.getProjectName(), serviceRequest, serviceName, portNumber);
+                logger.info("서비스 배포 완료: {}", serviceName);
             } catch (Exception e) {
                 String errorMessage = String.format(
-                        "서비스 '%s' 배포 실패: %s",
-                        service.getServiceName(),
+                        "서비스 ID '%d' 배포 실패: %s",
+                        serviceRequest.getServiceId(),
                         e.getMessage()
                 );
                 logger.error(errorMessage, e);
@@ -64,17 +76,16 @@ public class K8sDeploymentServiceImpl implements K8sDeploymentService {
     /**
      * 개별 서비스에 대한 Deployment와 Service YAML을 생성하고 kubectl apply를 실행합니다.
      */
-    private void deployService(String projectName, ServiceDeployRequest service) {
-        String yaml = generateK8sYaml(projectName, service);
+    private void deployService(String projectName, ServiceDeployRequest service, String serviceName, int portNumber) {
+        String yaml = generateK8sYaml(projectName, service, serviceName, portNumber);
         kubectlExecutor.applyYaml(yaml);
     }
 
     /**
      * Kubernetes Deployment와 Service YAML을 생성합니다.
      */
-    private String generateK8sYaml(String projectName, ServiceDeployRequest service) {
-        String deploymentName = projectName + "-" + service.getServiceName();
-        String serviceName = service.getServiceName();
+    private String generateK8sYaml(String projectName, ServiceDeployRequest service, String serviceName, int portNumber) {
+        String deploymentName = projectName + "-" + serviceName;
         String imageUri = service.getImageUri();
         String imagePullSecretName = k8sSecretService.getImagePullSecretName();
 
@@ -111,7 +122,7 @@ public class K8sDeploymentServiceImpl implements K8sDeploymentService {
                 imagePullSecretName,
                 serviceName,
                 imageUri,
-                CONTAINER_PORT
+                portNumber
         ));
 
         yaml.append("---\n");
@@ -133,7 +144,7 @@ public class K8sDeploymentServiceImpl implements K8sDeploymentService {
                 serviceName,
                 serviceName,
                 SERVICE_PORT,
-                CONTAINER_PORT
+                portNumber
         ));
 
         logger.debug("생성된 YAML for {}:\n{}", serviceName, yaml);

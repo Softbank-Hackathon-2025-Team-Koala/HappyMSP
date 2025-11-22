@@ -14,8 +14,6 @@ import sbhackathon.koala.happyMSP.dto.ServiceDeployRequest;
 import sbhackathon.koala.happyMSP.service.IngressService;
 import sbhackathon.koala.happyMSP.service.K8sDeploymentService;
 
-import java.util.stream.Collectors;
-
 @RestController
 @RequestMapping("/api")
 public class DeploymentController {
@@ -24,6 +22,7 @@ public class DeploymentController {
 
     private final K8sDeploymentService k8sDeploymentService;
     private final IngressService ingressService;
+
 
     public DeploymentController(K8sDeploymentService k8sDeploymentService,
                                 IngressService ingressService) {
@@ -64,9 +63,7 @@ public class DeploymentController {
             DeploymentResponse response = new DeploymentResponse(
                     "배포가 성공적으로 완료되었습니다.",
                     "SUCCESS",
-                    request.getServices().stream()
-                            .map(ServiceDeployRequest::getServiceName)
-                            .collect(Collectors.toList())
+                    null
             );
 
             logger.info("배포 성공 - 프로젝트: {}", request.getProjectName());
@@ -115,9 +112,7 @@ public class DeploymentController {
             DeploymentResponse response = new DeploymentResponse(
                     "Ingress가 성공적으로 생성되었습니다.",
                     "SUCCESS",
-                    request.getServices().stream()
-                            .map(ServiceDeployRequest::getServiceName)
-                            .collect(Collectors.toList())
+                    null
             );
 
             logger.info("Ingress 생성 성공 - 프로젝트: {}", request.getProjectName());
@@ -161,15 +156,15 @@ public class DeploymentController {
 
         for (int i = 0; i < request.getServices().size(); i++) {
             var service = request.getServices().get(i);
-            if (service.getServiceName() == null || service.getServiceName().trim().isEmpty()) {
+            if (service.getServiceId() <= 0) {
                 throw new IllegalArgumentException(
-                        String.format("서비스[%d]의 serviceName이 비어있습니다.", i)
+                        String.format("서비스[%d]의 serviceId가 올바르지 않습니다.", i)
                 );
             }
             if (service.getImageUri() == null || service.getImageUri().trim().isEmpty()) {
                 throw new IllegalArgumentException(
-                        String.format("서비스[%d](%s)의 imageUri가 비어있습니다.",
-                                i, service.getServiceName())
+                        String.format("서비스[%d](ID: %d)의 imageUri가 비어있습니다.",
+                                i, service.getServiceId())
                 );
             }
         }
