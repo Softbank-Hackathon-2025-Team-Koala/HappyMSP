@@ -37,7 +37,7 @@ public class MonitorService {
             List<sbhackathon.koala.happyMSP.entity.Service> services = waitForBuildAndArtifacts(repoUrl);
 
             if (services == null || services.isEmpty()) {
-                notifier.publish(repoUrl, "deployment-failed", "배포 중단: 빌드 정보를 찾을 수 없거나 시간이 초과되었습니다.");
+                notifier.publish(repoUrl, "deployment-failed", "Deployment aborted: Build information not found or timed out.");
                 return;
             }
 
@@ -55,6 +55,7 @@ public class MonitorService {
                     String fullImageUri = ecr.getUri();
 
                     Map<String, String> svcMap = new HashMap<>();
+                    svcMap.put("serviceId", String.valueOf(service.getId()));
                     svcMap.put("serviceName", service.getName());
                     svcMap.put("imageUri", fullImageUri);
                     servicePayloads.add(svcMap);
@@ -66,7 +67,7 @@ public class MonitorService {
             deployRequestPayload.put("services", servicePayloads);
 
             Map<String, Object> eventData = new HashMap<>();
-            eventData.put("message", "🚀 " + services.size() + "개의 서비스(" + projectName + ") EKS 배포를 시작합니다.");
+            eventData.put("message", "🚀 Starting EKS deployment for " + services.size() + " services (" + projectName + ").");
             eventData.put("payload", deployRequestPayload);
 
             notifier.publish(repoUrl, "stage-2-start", eventData);
@@ -84,47 +85,56 @@ public class MonitorService {
                                 .allMatch(CompletableFuture::join);
 
                         if (isAllSuccess) {
-                            notifier.publish(repoUrl, "all-complete", "🎉 모든 서비스 배포가 완료되었습니다!");
+                            // ✅ [수정] 성공 시 Ingress 주소 조회 및 포함
+                            String ingressUrl = k8sResourcePoller.getIngressUrl(projectName);
+
+                            Map<String, String> resultData = new HashMap<>();
+                            resultData.put("message", "🎉 All services have been successfully deployed!");
+                            resultData.put("address", ingressUrl); // 👈 여기에 주소 추가됨
+
+                            // 문자열 대신 Map 객체를 data로 전송
+                            notifier.publish(repoUrl, "all-complete", resultData);
+
                         } else {
-                            notifier.publish(repoUrl, "deployment-failed", "❌ 일부 서비스 배포에 실패하였습니다. 로그를 확인해주세요.");
+                            notifier.publish(repoUrl, "deployment-failed", "❌ Deployment failed for some services. Please check the logs.");
                         }
                     });
 
         } catch (Exception e) {
             log.error("Pipeline Error", e);
-            notifier.publish(repoUrl, "deployment-failed", "서버 내부 오류 발생: " + e.getMessage());
+            notifier.publish(repoUrl, "deployment-failed", "Internal server error occurred: " + e.getMessage());
         }
     }
 
     private boolean monitorSingleServicePipeline(String repoUrl, String projectName, sbhackathon.koala.happyMSP.entity.Service service) {
         String serviceName = service.getName();
 
-        notifier.sendServiceLog(repoUrl, serviceName, "RESOURCE", "PENDING", "K8s 리소스 생성 대기 중...");
+        notifier.sendServiceLog(repoUrl, serviceName, "RESOURCE", "PENDING", "Waiting for K8s resource creation...");
 
         if (!k8sResourcePoller.pollK8sResourceCreation(repoUrl, projectName, serviceName)) {
-            notifier.sendServiceLog(repoUrl, serviceName, "RESOURCE", "FAILED", "리소스 생성 실패");
+            notifier.sendServiceLog(repoUrl, serviceName, "RESOURCE", "FAILED", "Resource creation failed");
             return false;
         }
-        notifier.sendServiceLog(repoUrl, serviceName, "RESOURCE", "SUCCESS", "K8s 리소스 생성 확인됨");
+        notifier.sendServiceLog(repoUrl, serviceName, "RESOURCE", "SUCCESS", "K8s resource creation confirmed");
 
         if (!k8sResourcePoller.pollPodStartupStatus(repoUrl, projectName, serviceName)) {
-            notifier.sendServiceLog(repoUrl, serviceName, "POD", "FAILED", "Pod 구동 실패 (Timeout)");
+            notifier.sendServiceLog(repoUrl, serviceName, "POD", "FAILED", "Pod startup failed (Timeout)");
             return false;
         }
 
-        notifier.sendServiceLog(repoUrl, serviceName, "INGRESS", "PENDING", "외부 접속 주소(ALB) 할당 대기 중...");
+        notifier.sendServiceLog(repoUrl, serviceName, "INGRESS", "PENDING", "Waiting for external access address (ALB) allocation...");
 
         if (!k8sResourcePoller.pollIngressStatus(repoUrl, projectName, serviceName)) {
-            notifier.sendServiceLog(repoUrl, serviceName, "INGRESS", "FAILED", "Ingress 설정 실패");
+            notifier.sendServiceLog(repoUrl, serviceName, "INGRESS", "FAILED", "Ingress configuration failed");
             return false;
         }
-        notifier.sendServiceLog(repoUrl, serviceName, "INGRESS", "SUCCESS", "외부 접속 준비 완료");
+        notifier.sendServiceLog(repoUrl, serviceName, "INGRESS", "SUCCESS", "Ready for external access");
 
         return true;
     }
 
     private List<sbhackathon.koala.happyMSP.entity.Service> waitForBuildAndArtifacts(String repoUrl) {
-        notifier.publish(repoUrl, "stage-1-start", "🏗️ 1단계: 빌드 및 이미지 생성 중...");
+        notifier.publish(repoUrl, "stage-1-start", "🏗️ Stage 1: Building and creating images...");
 
         String searchUrl = extractRepoUri(repoUrl);
 
@@ -156,14 +166,14 @@ public class MonitorService {
                 }
 
                 if (allImagesReady) {
-                    notifier.publish(repoUrl, "stage-1-success", "✅ 빌드 완료: " + repo.getServices().size() + "개 서비스 이미지 등록됨");
+                    notifier.publish(repoUrl, "stage-1-success", "✅ Build complete: " + repo.getServices().size() + " service images registered");
                     return repo.getServices();
                 }
             }
             sleep(3000);
         }
 
-        notifier.publish(repoUrl, "stage-1-failed", "❌ 빌드/배포 준비 시간 초과");
+        notifier.publish(repoUrl, "stage-1-failed", "❌ Build/Deployment preparation timed out");
         return null;
     }
 

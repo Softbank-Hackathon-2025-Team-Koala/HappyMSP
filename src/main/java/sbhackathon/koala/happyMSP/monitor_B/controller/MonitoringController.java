@@ -46,7 +46,7 @@ public class MonitoringController {
         emitter.onTimeout(cleanup);
         emitter.onError((e) -> cleanup.run());
 
-        eventStream.publish(new SseEvent(repoUrl, "connected", "배포 모니터링 연결 성공"));
+        eventStream.publish(new SseEvent(repoUrl, "connected", "Deployment monitoring connection successful"));
         monitorService.startDeploymentPipeline(repoUrl);
 
         return emitter;

@@ -110,4 +110,3 @@ public class IngressServiceImpl implements IngressService {
         return yaml.toString();
     }
 }
-
