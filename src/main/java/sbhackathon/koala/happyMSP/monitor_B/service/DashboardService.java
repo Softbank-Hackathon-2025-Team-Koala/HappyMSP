@@ -40,6 +40,8 @@ public class DashboardService {
 
     private final RepoRepository repoRepository;
     private final SseEventStream eventStream;
+    // [추가] Ingress URL 조회를 위해 Poller 주입
+    private final K8sResourcePoller k8sResourcePoller;
 
     private final Map<String, ServiceMetricDto> podStateCache = new ConcurrentHashMap<>();
     private final Map<String, String[]> metricsCache = new ConcurrentHashMap<>();
@@ -68,9 +70,17 @@ public class DashboardService {
         Repository repo = repoRepository.findByUri(searchUrl)
                 .orElseThrow(() -> new RuntimeException("Repository not found: " + searchUrl));
 
-        // [변경] 프로젝트명을 repo.getId()가 아닌 리포지토리 이름으로 설정
         String projectName = extractRepositoryName(repoUrl);
         log.info("Monitoring Project Name (Sanitized): {}", projectName);
+
+        // [추가] 대시보드 진입 시 Ingress URL 정보 전송
+        String ingressUrl = k8sResourcePoller.getIngressUrl(projectName);
+        if (ingressUrl != null) {
+            log.info("Sending Ingress URL to dashboard: {}", ingressUrl);
+            eventStream.publish(new SseEvent(metricKey, "ingress-info", ingressUrl));
+        } else {
+            log.warn("Ingress URL not found for project: {}", projectName);
+        }
 
         podStateCache.clear();
         metricsCache.clear();
@@ -87,6 +97,8 @@ public class DashboardService {
             metricExecutor.shutdownNow();
         }
     }
+
+    // ... (이하 기존 코드 동일: runPodWatcher, runMetricPoller, updatePodCache, broadcastToFrontend, executeCommand 등) ...
 
     private void runPodWatcher(String projectName, String metricKey) throws Exception {
         ApiClient client = api.getApiClient();
@@ -125,7 +137,6 @@ public class DashboardService {
 
                     String podName = pod.getMetadata().getName();
 
-                    // [중요] 파드 이름이 프로젝트 이름으로 시작하는지 확인
                     if (podName != null && podName.startsWith(projectName)) {
                         String eventType = item.type;
 
@@ -273,13 +284,11 @@ public class DashboardService {
         }
     }
 
-    // [변경] 프로젝트명이 가변적이므로 로직 일반화
     private String extractServiceName(String projectName, String podName) {
         try {
-            String prefix = projectName + "-"; // 예: softbank_test_repo-
+            String prefix = projectName + "-";
             if (podName.startsWith(prefix)) {
                 String temp = podName.substring(prefix.length());
-                // 마지막 두 개의 해시값 부분 제거 (예: was-7fdbdf7b59-k5ghb -> was)
                 int lastDash = temp.lastIndexOf('-');
                 if (lastDash > 0) {
                     String temp2 = temp.substring(0, lastDash);
@@ -299,13 +308,11 @@ public class DashboardService {
         return url;
     }
 
-    // [추가] 리포지토리 이름 추출
     private String extractRepositoryName(String repoUrl) {
         String uri = normalizeUrl(repoUrl);
         String[] parts = uri.split("/");
         if (parts.length > 0) {
             String repoName = parts[parts.length - 1];
-            // 언더바(_)를 하이픈(-)으로 치환
             return repoName.toLowerCase().replaceAll("[^a-z0-9.-]", "-");
         }
         return "unknown-repo";

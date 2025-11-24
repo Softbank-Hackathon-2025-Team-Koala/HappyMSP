@@ -21,8 +21,8 @@ public class K8sDeploymentServiceImpl implements K8sDeploymentService {
     private final ServiceRepository serviceRepository;
 
     public K8sDeploymentServiceImpl(KubectlExecutor kubectlExecutor,
-                                     K8sSecretService k8sSecretService,
-                                     ServiceRepository serviceRepository) {
+                                    K8sSecretService k8sSecretService,
+                                    ServiceRepository serviceRepository) {
         this.kubectlExecutor = kubectlExecutor;
         this.k8sSecretService = k8sSecretService;
         this.serviceRepository = serviceRepository;
@@ -151,4 +151,3 @@ public class K8sDeploymentServiceImpl implements K8sDeploymentService {
         return yaml.toString();
     }
 }
-

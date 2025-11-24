@@ -89,16 +89,16 @@ public class K8sResourcePoller {
                         int updated = deployment.getStatus().getUpdatedReplicas() != null ? deployment.getStatus().getUpdatedReplicas() : 0;
 
                         if (ready >= desired && desired > 0) {
-                            notifier.sendServiceLog(repoUrl, serviceName, "POD", "SUCCESS", "Pod 정상 구동 (Ready)");
+                            notifier.sendServiceLog(repoUrl, serviceName, "POD", "SUCCESS", "Pod is running normally (Ready)");
                             return true;
                         }
 
                         if (updated < desired) {
-                            lastStatus = updateStatus(repoUrl, serviceName, "SCALING", "Pod 생성 요청 중...", lastStatus);
+                            lastStatus = updateStatus(repoUrl, serviceName, "SCALING", "Requesting Pod creation...", lastStatus);
                         } else if (available < desired) {
-                            lastStatus = updateStatus(repoUrl, serviceName, "PULLING", "이미지 다운로드 및 컨테이너 실행 중...", lastStatus);
+                            lastStatus = updateStatus(repoUrl, serviceName, "PULLING", "Downloading image and starting container...", lastStatus);
                         } else {
-                            lastStatus = updateStatus(repoUrl, serviceName, "RUNNING", "애플리케이션 초기화 중...", lastStatus);
+                            lastStatus = updateStatus(repoUrl, serviceName, "RUNNING", "Initializing application...", lastStatus);
                         }
                     }
                 } catch (ApiException ignored) {
@@ -129,7 +129,7 @@ public class K8sResourcePoller {
                             && !ingress.getStatus().getLoadBalancer().getIngress().isEmpty()) {
 
                         String albUrl = ingress.getStatus().getLoadBalancer().getIngress().get(0).getHostname();
-                        notifier.sendServiceLog(repoUrl, serviceName, "INGRESS", "INFO", "접속 주소 확보: " + albUrl);
+                        notifier.sendServiceLog(repoUrl, serviceName, "INGRESS", "INFO", "Access address secured: " + albUrl);
                         return true;
                     }
                 } catch (ApiException e) {
@@ -143,6 +143,27 @@ public class K8sResourcePoller {
         return false;
     }
 
+    public String getIngressUrl(String projectName) {
+        try {
+            NetworkingV1Api api = new NetworkingV1Api();
+            String targetIngressName = projectName + "-ingress"; // 생성 규칙에 맞춤
+
+            V1Ingress ingress = api.readNamespacedIngress(targetIngressName, NAMESPACE).execute();
+
+            if (ingress != null && ingress.getStatus() != null
+                    && ingress.getStatus().getLoadBalancer() != null
+                    && ingress.getStatus().getLoadBalancer().getIngress() != null
+                    && !ingress.getStatus().getLoadBalancer().getIngress().isEmpty()) {
+
+                // AWS ALB 주소 반환 (http:// 붙여서)
+                return "http://" + ingress.getStatus().getLoadBalancer().getIngress().get(0).getHostname();
+            }
+        } catch (Exception e) {
+            log.warn("Failed to fetch Ingress URL for project: {}", projectName, e);
+        }
+        return null; // 주소를 찾지 못한 경우
+    }
+
     private String updateStatus(String repoUrl, String serviceName, String status, String msg, String lastStatus) {
         if (!status.equals(lastStatus)) {
             notifier.sendServiceLog(repoUrl, serviceName, "POD", status, msg);
@@ -150,6 +171,7 @@ public class K8sResourcePoller {
         }
         return lastStatus;
     }
+
 
     private void sleep(long ms) {
         try { Thread.sleep(ms); } catch (InterruptedException ignored) {}
